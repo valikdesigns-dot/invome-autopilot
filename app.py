@@ -150,9 +150,17 @@ def make_media(copy, post_id):
     d.text((90,1660),'Inventory made simpler for small business.',font=font(38,False),fill=(238,238,238))
     png=f'post_{post_id}.png'; mp4=f'post_{post_id}.mp4'
     img.save(MEDIA_DIR/png)
-    subprocess.run(['ffmpeg','-y','-loop','1','-i',str(MEDIA_DIR/png),'-t','10','-vf',
-                    "scale=1080:1920,zoompan=z='min(zoom+0.0006,1.05)':d=250:s=1080x1920:fps=25,format=yuv420p",
-                    '-c:v','libx264','-pix_fmt','yuv420p',str(MEDIA_DIR/mp4)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=True)
+    # Railway's smallest containers cannot safely render a 1080p zoompan animation.
+    # A 540x960 H.264 still-video remains vertical and Facebook-compatible while
+    # using a fraction of the memory.
+    result=subprocess.run([
+        'ffmpeg','-y','-framerate','1','-loop','1','-i',str(MEDIA_DIR/png),
+        '-t','6','-vf','scale=540:960:flags=lanczos,format=yuv420p',
+        '-r','1','-c:v','libx264','-preset','ultrafast','-threads','1',
+        '-movflags','+faststart',str(MEDIA_DIR/mp4)
+    ],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,text=True)
+    if result.returncode:
+        raise RuntimeError(f"Video rendering failed: {result.stderr[-500:]}")
     return mp4
 
 def create_post(scheduled_at=None):
@@ -161,8 +169,14 @@ def create_post(scheduled_at=None):
         cur=c.execute('INSERT INTO posts(created_at,scheduled_at,title,caption,hook,platforms,status) VALUES (?,?,?,?,?,?,?)',
               (datetime.now(timezone.utc).isoformat(),scheduled_at,cp['title'],cp['caption'],cp['hook'],s['platforms'],'draft'))
         pid=cur.lastrowid
+    try:
         media=make_media(cp,pid)
-        c.execute('UPDATE posts SET media_file=? WHERE id=?',(media,pid))
+        with db_conn() as c:
+            c.execute('UPDATE posts SET media_file=? WHERE id=?',(media,pid))
+    except Exception as e:
+        with db_conn() as c:
+            c.execute('UPDATE posts SET status=?,error=? WHERE id=?',('failed',str(e),pid))
+        raise
     return pid
 
 def facebook_config():
@@ -242,11 +256,16 @@ def settings_route():
 
 @app.post('/generate')
 def generate_route():
-    create_post(); return '<script>location.href="/"</script>'
+    try: create_post()
+    except Exception: pass
+    return '<script>location.href="/"</script>'
 
 @app.post('/generate-test')
 def generate_test_route():
-    pid=create_post(); publish_post(pid,force_test=True); return '<script>location.href="/"</script>'
+    try:
+        pid=create_post(); publish_post(pid,force_test=True)
+    except Exception: pass
+    return '<script>location.href="/"</script>'
 
 @app.post('/api/autopilot/run')
 def run_api():
