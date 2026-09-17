@@ -195,6 +195,29 @@ def facebook_payload(post, live=False, base_url=None):
         'published': 'true' if live else 'false',
     }
 
+def page_access_token(cfg):
+    """Exchange the configured user/system-user token for this Page's token."""
+    root=f"https://graph.facebook.com/{cfg['api_version']}"
+    params={'fields':'access_token','access_token':cfg['token']}
+    direct=requests.get(f"{root}/{cfg['page_id']}",params=params,timeout=30)
+    if direct.ok:
+        token=direct.json().get('access_token')
+        if token: return token
+
+    # User tokens expose managed Pages through /me/accounts. Keep this fallback
+    # so either supported Meta token type works without changing Railway.
+    accounts=requests.get(
+        f"{root}/me/accounts",
+        params={'fields':'id,access_token','access_token':cfg['token']},
+        timeout=30,
+    )
+    if accounts.ok:
+        for page in accounts.json().get('data',[]):
+            if str(page.get('id')) == str(cfg['page_id']) and page.get('access_token'):
+                return page['access_token']
+    detail=(direct.text or accounts.text)[:500]
+    raise RuntimeError(f'Meta could not provide a Page access token: {detail}')
+
 def publish_post(pid, force_test=False):
     s=get_settings(); cfg=facebook_config()
     if not cfg['token']: return False,'FACEBOOK_PAGE_ACCESS_TOKEN is not configured'
@@ -204,8 +227,8 @@ def publish_post(pid, force_test=False):
     if not p: return False,'not found'
     live=(s.get('publishing_mode')=='live' and not force_test)
     payload=facebook_payload(p,live=live,base_url=s['base_url'])
-    payload['access_token']=cfg['token']
     try:
+        payload['access_token']=page_access_token(cfg)
         url=f"https://graph.facebook.com/{cfg['api_version']}/{cfg['page_id']}/videos"
         r=requests.post(url,data=payload,timeout=90)
         if r.status_code>=400:
