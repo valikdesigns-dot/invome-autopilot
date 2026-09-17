@@ -18,7 +18,7 @@ DEFAULTS = {
     'brand_name': 'Invome',
     'site_url': 'https://invomestudio.com',
     'offer': '7-day free trial • $9.99/month or $99.99/year',
-    'audience': 'small business owners who need a simpler way to track inventory',
+    'audience': 'handmade sellers who need to track supplies, calculate real product costs, price confidently, print barcode labels, run checkout, and understand sales',
     'platforms': 'facebook',
     'posting_days': '0,1,2,3,4,5,6',
     'posting_hour': '18',
@@ -70,25 +70,25 @@ def save_settings(data):
                 c.execute('INSERT INTO settings(k,v) VALUES (?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v',(k,str(v)))
 
 CONTENT_ANGLES = [
-    ('Know what is running low before a customer asks.', 'Last-minute stock checks steal time and make every sale harder.', 'see what needs attention and act before low stock becomes a missed sale'),
-    ('Stop relying on memory to run your inventory.', 'Notebook counts and scattered lists get outdated fast.', 'keep your stock information organized in one straightforward place'),
-    ('Spend less time counting. Spend more time growing.', 'Inventory admin should not consume the hours you need for customers.', 'stay on top of everyday stock without turning it into a second job'),
-    ('Make confident restocking decisions.', 'Guessing what to reorder can tie up money in the wrong products.', 'understand what you have before you spend on more inventory'),
-    ('Turn “I think we have it” into “Yes, we do.”', 'Customers expect a clear answer when they ask what is available.', 'check stock with confidence and give customers a better experience'),
-    ('Your inventory can feel under control again.', 'Growing product lists become stressful when the system cannot keep up.', 'build a simpler routine that is easier to maintain as your business grows'),
-    ('Catch low stock before it costs you a sale.', 'A popular item can disappear faster than expected.', 'spot items that need attention while there is still time to reorder'),
-    ('Replace inventory chaos with one clear view.', 'Multiple spreadsheets and handwritten notes create duplicate work.', 'bring everyday inventory tracking into one clean, accessible workflow'),
+    ('Stop losing profit to pricing guesswork.', 'When material, packaging, labor, and fees are scattered, it is easy to underprice beautiful work.', 'see your real product costs and choose prices with confidence'),
+    ('Know what every handmade product really costs.', 'A finished piece costs more than the most obvious material.', 'bring supplies, labor, packaging, overhead, and selling fees into one clear calculation'),
+    ('Create more. Chase supply counts less.', 'Your creative time should not disappear into notebooks and disconnected spreadsheets.', 'keep craft supplies organized without turning inventory into another full-time job'),
+    ('Price your handmade work with confidence.', 'Guessing can leave your time unpaid and your profit too thin.', 'build prices from real costs instead of hoping the numbers work'),
+    ('Turn supply chaos into a calmer studio.', 'Running out of the right material can stop an order halfway through.', 'track what you use and see what needs attention before it becomes a problem'),
+    ('Your craft is creative. Your pricing should be clear.', 'You should not need a maze of spreadsheets to know whether a product is profitable.', 'calculate costs and markups in one practical workflow'),
+    ('From raw materials to checkout—in one app.', 'Switching between separate tools creates extra work and missed details.', 'track supplies, price products, print labels, run checkout, and review sales together'),
+    ('Protect the profit behind every handmade sale.', 'Small uncounted costs add up across materials, packaging, labor, and fees.', 'account for the details that help turn creative work into a sustainable business'),
 ]
 
 def ai_copy(settings):
     key = os.getenv('OPENAI_API_KEY')
     model = os.getenv('OPENAI_MODEL','')
     if key and model:
-        prompt = f'''Create ONE conversion-focused social media campaign for {settings['brand_name']}, an inventory app for {settings['audience']}.
+        prompt = f'''Create ONE conversion-focused social media campaign for {settings['brand_name']} Studio, a business app for {settings['audience']}.
 Offer: {settings['offer']}
 Website: {settings['site_url']}
 Return strict JSON with keys: hook, title, caption, visual_text.
-Rules: lead with a recognizable inventory pain; show a concrete day-to-day outcome; make the reader picture the relief or confidence they gain; end with one low-friction CTA to start the free trial. Friendly, specific and practical, never hypey. Caption 55-95 words. No fake statistics, testimonials, urgency or unsupported feature claims. Max 3 relevant hashtags. Do not mention AI. visual_text must be one punchy benefit-led headline, not a paragraph.'''
+Rules: write specifically for a handmade maker or craft seller. Lead with a recognizable pain involving supply chaos, hidden material costs, underpricing, labels, checkout, or unclear profit. Show a concrete outcome using only these supported capabilities: track craft supplies, calculate product prices from real costs, print barcode labels, run checkout, and view sales reports. Make the reader picture feeling organized and confident. End with one low-friction CTA to start the free trial. Friendly, specific and practical, never hypey. Caption 55-95 words. No fake statistics, testimonials, urgency or unsupported claims. Max 3 relevant hashtags. Do not mention AI. visual_text must be one punchy benefit-led headline, not a paragraph.'''
         try:
             r = requests.post('https://api.openai.com/v1/responses', headers={
                 'Authorization': f'Bearer {key}', 'Content-Type':'application/json'
@@ -109,10 +109,10 @@ Rules: lead with a recognizable inventory pain; show a concrete day-to-day outco
         except Exception:
             pass
     hook, pain, outcome = random.choice(CONTENT_ANGLES)
-    title = random.choice(['Inventory with less guesswork','A clearer way to manage stock','Know what needs attention','Make inventory feel manageable'])
+    title = random.choice(['Made for handmade sellers','Know your real costs','Price your craft with confidence','A calmer way to run your studio'])
     caption = (f"{hook} {pain} InvoMe helps you {outcome}. "
-               f"Start your 7-day free trial today and see how much simpler your inventory routine can feel. "
-               f"{settings['site_url']} #SmallBusiness #InventoryManagement #InvoMe")
+               f"Start your 7-day free trial today—no card needed—and see how much clearer your handmade business can feel. "
+               f"{settings['site_url']} #HandmadeBusiness #CraftBusiness #InvoMeStudio")
     return {'hook':hook,'title':title,'caption':caption,'visual_text':hook}
 
 def font(size=58, bold=False):
@@ -120,6 +120,10 @@ def font(size=58, bold=False):
     for p in paths:
         if Path(p).exists(): return ImageFont.truetype(p,size)
     return ImageFont.load_default()
+
+def brand_font(size=58):
+    p='/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf'
+    return ImageFont.truetype(p,size) if Path(p).exists() else font(size,True)
 
 def fit_text(draw, text, width, start=64, min_size=30, bold=True):
     size=start
@@ -143,66 +147,66 @@ def fit_text(draw, text, width, start=64, min_size=30, bold=True):
 
 def make_media(copy, post_id, site_url):
     W,H=1080,1920
-    # Deep navy-to-indigo brand gradient.
-    img=Image.new('RGB',(W,H)); d=ImageDraw.Draw(img)
-    top=(12,22,48); bottom=(42,30,92)
-    for y in range(H):
-        t=y/(H-1)
-        color=tuple(int(top[i]*(1-t)+bottom[i]*t) for i in range(3))
-        d.line((0,y,W,y),fill=color)
+    bg_path=APP_DIR/'invome-studio-bg.png'
+    icon_path=APP_DIR/'invome-icon.png'
+    if bg_path.exists():
+        bg=Image.open(bg_path).convert('RGB')
+        scale=max(W/bg.width,H/bg.height)
+        bg=bg.resize((int(bg.width*scale),int(bg.height*scale)),Image.Resampling.LANCZOS)
+        left=(bg.width-W)//2; top=(bg.height-H)//2
+        img=bg.crop((left,top,left+W,top+H)).convert('RGBA')
+    else:
+        img=Image.new('RGBA',(W,H),(250,247,244,255))
 
-    # Soft dimensional background accents.
-    glow=Image.new('RGBA',(W,H),(0,0,0,0)); gd=ImageDraw.Draw(glow)
-    gd.ellipse((650,-170,1250,430),fill=(74,222,180,70))
-    gd.ellipse((-300,1180,500,1980),fill=(104,92,255,65))
-    glow=glow.filter(ImageFilter.GaussianBlur(80)); img=Image.alpha_composite(img.convert('RGBA'),glow)
-    d=ImageDraw.Draw(img)
-    for x,y,r in [(95,380,7),(960,520,5),(875,1420,8),(150,1580,5)]:
-        d.ellipse((x-r,y-r,x+r,y+r),fill=(255,255,255,100))
+    # Warm ivory editorial panel with a soft fade into the approved lifestyle photo.
+    overlay=Image.new('RGBA',(W,H),(0,0,0,0)); od=ImageDraw.Draw(overlay)
+    od.rectangle((0,0,W,770),fill=(252,248,245,246))
+    for y in range(770,1030):
+        alpha=int(246*(1-(y-770)/260))
+        od.line((0,y,W,y),fill=(252,248,245,alpha))
+    od.rectangle((0,1510,W,H),fill=(252,248,245,244))
+    img=Image.alpha_composite(img,overlay); d=ImageDraw.Draw(img)
 
-    # Brand header and category pill.
-    d.rounded_rectangle((70,82,330,164),radius=41,fill=(255,255,255,24),outline=(255,255,255,70),width=2)
-    d.ellipse((94,106,140,152),fill=(71,224,174,255))
-    d.text((158,103),'INVOME',font=font(38,True),fill='white')
-    d.rounded_rectangle((720,94,1008,154),radius=30,fill=(71,224,174,255))
-    d.text((763,109),'SMALL BUSINESS',font=font(24,True),fill=(9,31,42,255))
+    # Exact InvoMe icon and wordmark.
+    if icon_path.exists():
+        icon=Image.open(icon_path).convert('RGBA')
+        # Remove the checkerboard preview background while preserving the mark.
+        cleaned=[]
+        for r,g,b,a in icon.getdata():
+            if min(r,g,b)>185 and max(r,g,b)-min(r,g,b)<10: cleaned.append((r,g,b,0))
+            else: cleaned.append((r,g,b,a))
+        icon.putdata(cleaned); icon.thumbnail((88,88),Image.Resampling.LANCZOS)
+        img.alpha_composite(icon,(68,58))
+    d.text((172,72),'InvoMe Studio',font=brand_font(42),fill=(20,16,18,255))
+    d.text((70,194),'MADE FOR HANDMADE SELLERS',font=font(25,True),fill=(111,91,103,255))
 
-    # Strong headline hierarchy.
-    d.text((72,238),copy['title'].upper(),font=font(27,True),fill=(110,236,198,255))
-    f,lines=fit_text(d,copy['hook'],900,76,44,True)
-    y=300
+    # One bold, editorial headline—no fake dashboard or crowded boxes.
+    size=78
+    while size>=48:
+        hf=brand_font(size); lines=[]; line=''
+        for word in copy['hook'].split():
+            test=(line+' '+word).strip()
+            if d.textbbox((0,0),test,font=hf)[2] <= 900: line=test
+            else:
+                if line: lines.append(line)
+                line=word
+        if line: lines.append(line)
+        if len(lines)<=4: break
+        size-=4
+    y=250
     for line in lines[:4]:
-        d.text((70,y),line,font=f,fill='white'); y+=int(f.size*1.16)
+        d.text((68,y),line,font=hf,fill=(139,43,82,255)); y+=int(size*1.08)
+    d.text((70,y+30),'Track supplies. Know your costs. Price with confidence.',font=font(29,True),fill=(18,17,18,255))
 
-    # Product-style inventory dashboard card with shadow.
-    card=(72,720,1008,1390)
-    shadow=Image.new('RGBA',(W,H),(0,0,0,0)); sd=ImageDraw.Draw(shadow)
-    sd.rounded_rectangle((card[0]+16,card[1]+22,card[2]+16,card[3]+22),radius=48,fill=(0,0,0,105))
-    shadow=shadow.filter(ImageFilter.GaussianBlur(24)); img=Image.alpha_composite(img,shadow); d=ImageDraw.Draw(img)
-    d.rounded_rectangle(card,radius=48,fill=(247,249,252,255))
-    d.text((122,775),'Inventory overview',font=font(39,True),fill=(20,30,50,255))
-    d.text((122,830),'Everything important, at a glance.',font=font(27),fill=(91,102,122,255))
-    d.rounded_rectangle((770,773,948,836),radius=30,fill=(224,250,241,255))
-    d.text((806,790),'LIVE VIEW',font=font(23,True),fill=(16,126,92,255))
-
-    rows=[('Stock at a glance','Know what you have',(71,224,174,255)),('Items needing attention','Act before stock runs out',(255,184,76,255)),('One clear workflow','Less hunting. Less guesswork.',(115,110,255,255))]
-    ry=910
-    for label,value,color in rows:
-        d.rounded_rectangle((118,ry,962,ry+112),radius=25,fill=(233,238,246,255))
-        d.rounded_rectangle((142,ry+25,204,ry+87),radius=18,fill=color)
-        d.text((232,ry+19),label,font=font(29,True),fill=(28,38,58,255))
-        d.text((232,ry+61),value,font=font(25),fill=(94,105,124,255))
-        d.text((900,ry+35),'›',font=font(42,True),fill=(115,124,143,255))
-        ry+=132
-
-    # Benefit strip and high-contrast CTA.
-    d.text((72,1474),'TRACK STOCK   •   SPOT TRENDS   •   REORDER SMARTER',font=font(25,True),fill=(205,211,230,255))
-    d.rounded_rectangle((70,1548,1010,1715),radius=42,fill=(71,224,174,255))
-    d.text((118,1587),'Try InvoMe free for 7 days',font=font(44,True),fill=(9,31,42,255))
-    d.text((118,1650),'Simple setup. Clear inventory. Less guesswork.',font=font(25),fill=(25,70,68,255))
+    # Simple conversion panel over the lower edge of the photo.
+    d.text((70,1560),'YOUR CRAFT IS CREATIVE.',font=font(24,True),fill=(111,91,103,255))
+    d.text((70,1600),'Your business numbers can be clear.',font=brand_font(43),fill=(139,43,82,255))
+    d.rounded_rectangle((70,1680,570,1765),radius=42,fill=(224,242,241,255),outline=(176,214,211,255),width=2)
+    d.text((111,1704),'START YOUR 7-DAY FREE TRIAL',font=font(23,True),fill=(6,94,99,255))
+    d.text((612,1707),'NO CARD NEEDED',font=font(22,True),fill=(111,91,103,255))
     display_url=site_url.removeprefix('https://').removeprefix('http://').split('/')[0]
-    box=d.textbbox((0,0),display_url,font=font(33,True)); tw=box[2]-box[0]
-    d.text(((W-tw)//2,1780),display_url,font=font(33,True),fill='white')
+    box=d.textbbox((0,0),display_url,font=font(31,True)); tw=box[2]-box[0]
+    d.text(((W-tw)//2,1825),display_url,font=font(31,True),fill=(20,16,18,255))
     png=f'post_{post_id}.png'; mp4=f'post_{post_id}.mp4'
     img.save(MEDIA_DIR/png)
     # Railway's smallest containers cannot safely render a 1080p zoompan animation.
