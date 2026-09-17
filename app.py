@@ -4,7 +4,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 from flask import Flask, request, jsonify, send_from_directory, render_template_string
 import requests
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from apscheduler.schedulers.background import BackgroundScheduler
 
 APP_DIR = Path(__file__).parent
@@ -16,7 +16,7 @@ app = Flask(__name__)
 
 DEFAULTS = {
     'brand_name': 'Invome',
-    'site_url': 'https://invome-560ba.web.app/start.html',
+    'site_url': 'https://invomestudio.com',
     'offer': '7-day free trial • $9.99/month or $99.99/year',
     'audience': 'small business owners who need a simpler way to track inventory',
     'platforms': 'facebook',
@@ -51,6 +51,10 @@ def init_db():
         )''')
         for k,v in DEFAULTS.items():
             c.execute('INSERT OR IGNORE INTO settings(k,v) VALUES (?,?)',(k,v))
+        c.execute(
+            "UPDATE settings SET v=? WHERE k='site_url' AND v=?",
+            ('https://invomestudio.com','https://invome-560ba.web.app/start.html'),
+        )
 
 def get_settings():
     with db_conn() as c:
@@ -66,25 +70,25 @@ def save_settings(data):
                 c.execute('INSERT INTO settings(k,v) VALUES (?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v',(k,str(v)))
 
 CONTENT_ANGLES = [
-    ('Stop guessing what you have in stock.', 'inventory visibility'),
-    ('Your inventory should not live in three notebooks and your memory.', 'organization'),
-    ('Know what is selling before you reorder.', 'smarter restocking'),
-    ('Small business owners have enough to remember.', 'time savings'),
-    ('That “I think I still have two left” feeling has to go.', 'accuracy'),
-    ('A simple inventory system can save hours every month.', 'efficiency'),
-    ('If stock counts stress you out, simplify the system.', 'pain point'),
-    ('Your business deserves better than spreadsheet chaos.', 'simplicity'),
+    ('Know what is running low before a customer asks.', 'Last-minute stock checks steal time and make every sale harder.', 'see what needs attention and act before low stock becomes a missed sale'),
+    ('Stop relying on memory to run your inventory.', 'Notebook counts and scattered lists get outdated fast.', 'keep your stock information organized in one straightforward place'),
+    ('Spend less time counting. Spend more time growing.', 'Inventory admin should not consume the hours you need for customers.', 'stay on top of everyday stock without turning it into a second job'),
+    ('Make confident restocking decisions.', 'Guessing what to reorder can tie up money in the wrong products.', 'understand what you have before you spend on more inventory'),
+    ('Turn “I think we have it” into “Yes, we do.”', 'Customers expect a clear answer when they ask what is available.', 'check stock with confidence and give customers a better experience'),
+    ('Your inventory can feel under control again.', 'Growing product lists become stressful when the system cannot keep up.', 'build a simpler routine that is easier to maintain as your business grows'),
+    ('Catch low stock before it costs you a sale.', 'A popular item can disappear faster than expected.', 'spot items that need attention while there is still time to reorder'),
+    ('Replace inventory chaos with one clear view.', 'Multiple spreadsheets and handwritten notes create duplicate work.', 'bring everyday inventory tracking into one clean, accessible workflow'),
 ]
 
 def ai_copy(settings):
     key = os.getenv('OPENAI_API_KEY')
     model = os.getenv('OPENAI_MODEL','')
     if key and model:
-        prompt = f'''Create ONE short social media campaign for {settings['brand_name']}, an inventory app for {settings['audience']}.
+        prompt = f'''Create ONE conversion-focused social media campaign for {settings['brand_name']}, an inventory app for {settings['audience']}.
 Offer: {settings['offer']}
 Website: {settings['site_url']}
 Return strict JSON with keys: hook, title, caption, visual_text.
-Rules: friendly, practical, not hypey; caption 45-90 words; include one clear CTA; no fake statistics; max 4 hashtags; do not mention AI.'''
+Rules: lead with a recognizable inventory pain; show a concrete day-to-day outcome; make the reader picture the relief or confidence they gain; end with one low-friction CTA to start the free trial. Friendly, specific and practical, never hypey. Caption 55-95 words. No fake statistics, testimonials, urgency or unsupported feature claims. Max 3 relevant hashtags. Do not mention AI. visual_text must be one punchy benefit-led headline, not a paragraph.'''
         try:
             r = requests.post('https://api.openai.com/v1/responses', headers={
                 'Authorization': f'Bearer {key}', 'Content-Type':'application/json'
@@ -104,10 +108,12 @@ Rules: friendly, practical, not hypey; caption 45-90 words; include one clear CT
                 return obj
         except Exception:
             pass
-    hook, angle = random.choice(CONTENT_ANGLES)
-    title = random.choice(['Inventory without the headache','Make stock day easier','A simpler way to stay organized','Know what you have'])
-    caption = f"{hook} Invome gives small businesses a straightforward place to keep inventory organized, so you can spend less time hunting for counts and more time running your business. Try it free for 7 days, then choose $9.99/month or $99.99/year. {settings['site_url']} #SmallBusiness #InventoryManagement #Invome"
-    return {'hook':hook,'title':title,'caption':caption,'visual_text':f"{hook}\n\nTry Invome free for 7 days"}
+    hook, pain, outcome = random.choice(CONTENT_ANGLES)
+    title = random.choice(['Inventory with less guesswork','A clearer way to manage stock','Know what needs attention','Make inventory feel manageable'])
+    caption = (f"{hook} {pain} InvoMe helps you {outcome}. "
+               f"Start your 7-day free trial today and see how much simpler your inventory routine can feel. "
+               f"{settings['site_url']} #SmallBusiness #InventoryManagement #InvoMe")
+    return {'hook':hook,'title':title,'caption':caption,'visual_text':hook}
 
 def font(size=58, bold=False):
     paths=['/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf' if bold else '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf']
@@ -135,19 +141,68 @@ def fit_text(draw, text, width, start=64, min_size=30, bold=True):
         size-=4
     return font(min_size,bold), lines
 
-def make_media(copy, post_id):
+def make_media(copy, post_id, site_url):
     W,H=1080,1920
-    img=Image.new('RGB',(W,H),(20,24,32)); d=ImageDraw.Draw(img)
-    # card
-    d.rounded_rectangle((70,180,1010,1520), radius=46, fill=(245,246,248))
-    d.text((120,260),'INVOME',font=font(58,True),fill=(20,24,32))
-    f,lines=fit_text(d,copy['visual_text'],760,72,34,True)
-    y=470
-    for line in lines:
-        d.text((120,y),line,font=f,fill=(20,24,32)); y+=int(f.size*1.28)
-    d.rounded_rectangle((120,1320,730,1430),radius=28,fill=(20,24,32))
-    d.text((165,1350),'invome-560ba.web.app',font=font(36,True),fill=(255,255,255))
-    d.text((90,1660),'Inventory made simpler for small business.',font=font(38,False),fill=(238,238,238))
+    # Deep navy-to-indigo brand gradient.
+    img=Image.new('RGB',(W,H)); d=ImageDraw.Draw(img)
+    top=(12,22,48); bottom=(42,30,92)
+    for y in range(H):
+        t=y/(H-1)
+        color=tuple(int(top[i]*(1-t)+bottom[i]*t) for i in range(3))
+        d.line((0,y,W,y),fill=color)
+
+    # Soft dimensional background accents.
+    glow=Image.new('RGBA',(W,H),(0,0,0,0)); gd=ImageDraw.Draw(glow)
+    gd.ellipse((650,-170,1250,430),fill=(74,222,180,70))
+    gd.ellipse((-300,1180,500,1980),fill=(104,92,255,65))
+    glow=glow.filter(ImageFilter.GaussianBlur(80)); img=Image.alpha_composite(img.convert('RGBA'),glow)
+    d=ImageDraw.Draw(img)
+    for x,y,r in [(95,380,7),(960,520,5),(875,1420,8),(150,1580,5)]:
+        d.ellipse((x-r,y-r,x+r,y+r),fill=(255,255,255,100))
+
+    # Brand header and category pill.
+    d.rounded_rectangle((70,82,330,164),radius=41,fill=(255,255,255,24),outline=(255,255,255,70),width=2)
+    d.ellipse((94,106,140,152),fill=(71,224,174,255))
+    d.text((158,103),'INVOME',font=font(38,True),fill='white')
+    d.rounded_rectangle((720,94,1008,154),radius=30,fill=(71,224,174,255))
+    d.text((763,109),'SMALL BUSINESS',font=font(24,True),fill=(9,31,42,255))
+
+    # Strong headline hierarchy.
+    d.text((72,238),copy['title'].upper(),font=font(27,True),fill=(110,236,198,255))
+    f,lines=fit_text(d,copy['hook'],900,76,44,True)
+    y=300
+    for line in lines[:4]:
+        d.text((70,y),line,font=f,fill='white'); y+=int(f.size*1.16)
+
+    # Product-style inventory dashboard card with shadow.
+    card=(72,720,1008,1390)
+    shadow=Image.new('RGBA',(W,H),(0,0,0,0)); sd=ImageDraw.Draw(shadow)
+    sd.rounded_rectangle((card[0]+16,card[1]+22,card[2]+16,card[3]+22),radius=48,fill=(0,0,0,105))
+    shadow=shadow.filter(ImageFilter.GaussianBlur(24)); img=Image.alpha_composite(img,shadow); d=ImageDraw.Draw(img)
+    d.rounded_rectangle(card,radius=48,fill=(247,249,252,255))
+    d.text((122,775),'Inventory overview',font=font(39,True),fill=(20,30,50,255))
+    d.text((122,830),'Everything important, at a glance.',font=font(27),fill=(91,102,122,255))
+    d.rounded_rectangle((770,773,948,836),radius=30,fill=(224,250,241,255))
+    d.text((806,790),'LIVE VIEW',font=font(23,True),fill=(16,126,92,255))
+
+    rows=[('Stock at a glance','Know what you have',(71,224,174,255)),('Items needing attention','Act before stock runs out',(255,184,76,255)),('One clear workflow','Less hunting. Less guesswork.',(115,110,255,255))]
+    ry=910
+    for label,value,color in rows:
+        d.rounded_rectangle((118,ry,962,ry+112),radius=25,fill=(233,238,246,255))
+        d.rounded_rectangle((142,ry+25,204,ry+87),radius=18,fill=color)
+        d.text((232,ry+19),label,font=font(29,True),fill=(28,38,58,255))
+        d.text((232,ry+61),value,font=font(25),fill=(94,105,124,255))
+        d.text((900,ry+35),'›',font=font(42,True),fill=(115,124,143,255))
+        ry+=132
+
+    # Benefit strip and high-contrast CTA.
+    d.text((72,1474),'TRACK STOCK   •   SPOT TRENDS   •   REORDER SMARTER',font=font(25,True),fill=(205,211,230,255))
+    d.rounded_rectangle((70,1548,1010,1715),radius=42,fill=(71,224,174,255))
+    d.text((118,1587),'Try InvoMe free for 7 days',font=font(44,True),fill=(9,31,42,255))
+    d.text((118,1650),'Simple setup. Clear inventory. Less guesswork.',font=font(25),fill=(25,70,68,255))
+    display_url=site_url.removeprefix('https://').removeprefix('http://').split('/')[0]
+    box=d.textbbox((0,0),display_url,font=font(33,True)); tw=box[2]-box[0]
+    d.text(((W-tw)//2,1780),display_url,font=font(33,True),fill='white')
     png=f'post_{post_id}.png'; mp4=f'post_{post_id}.mp4'
     img.save(MEDIA_DIR/png)
     # Railway's smallest containers cannot safely render a 1080p zoompan animation.
@@ -170,7 +225,7 @@ def create_post(scheduled_at=None):
               (datetime.now(timezone.utc).isoformat(),scheduled_at,cp['title'],cp['caption'],cp['hook'],s['platforms'],'draft'))
         pid=cur.lastrowid
     try:
-        media=make_media(cp,pid)
+        media=make_media(cp,pid,s['site_url'])
         with db_conn() as c:
             c.execute('UPDATE posts SET media_file=? WHERE id=?',(media,pid))
     except Exception as e:
