@@ -1,6 +1,7 @@
-import os, json, random, sqlite3, subprocess, textwrap
+import os, json, random, sqlite3, subprocess
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from flask import Flask, request, jsonify, send_from_directory, render_template_string
 import requests
 from PIL import Image, ImageDraw, ImageFont
@@ -18,11 +19,12 @@ DEFAULTS = {
     'site_url': 'https://invome-560ba.web.app/start.html',
     'offer': '7-day free trial • $9.99/month or $99.99/year',
     'audience': 'small business owners who need a simpler way to track inventory',
-    'platforms': 'facebook,instagram,tiktok,pinterest',
+    'platforms': 'facebook',
     'posting_days': '0,1,2,3,4,5,6',
     'posting_hour': '18',
     'timezone': 'America/New_York',
     'autopilot': '0',
+    'publishing_mode': 'test',
     'base_url': os.getenv('BASE_URL','http://localhost:5000'),
 }
 
@@ -163,25 +165,41 @@ def create_post(scheduled_at=None):
         c.execute('UPDATE posts SET media_file=? WHERE id=?',(media,pid))
     return pid
 
-def publish_post(pid):
-    s=get_settings(); key=os.getenv('AYRSHARE_API_KEY')
+def facebook_config():
+    return {
+        'token': os.getenv('FACEBOOK_PAGE_ACCESS_TOKEN','').strip(),
+        'page_id': os.getenv('FACEBOOK_PAGE_ID','').strip(),
+        'api_version': os.getenv('FACEBOOK_GRAPH_API_VERSION','v26.0').strip(),
+        'timezone': os.getenv('FACEBOOK_TIMEZONE','America/New_York').strip(),
+    }
+
+def facebook_payload(post, live=False, base_url=None):
+    media_url=f"{(base_url or get_settings()['base_url']).rstrip('/')}/media/{post['media_file']}"
+    return {
+        'file_url': media_url,
+        'description': post['caption'],
+        'published': 'true' if live else 'false',
+    }
+
+def publish_post(pid, force_test=False):
+    s=get_settings(); cfg=facebook_config()
+    if not cfg['token']: return False,'FACEBOOK_PAGE_ACCESS_TOKEN is not configured'
+    if not cfg['page_id']: return False,'FACEBOOK_PAGE_ID is not configured'
     with db_conn() as c:
         p=c.execute('SELECT * FROM posts WHERE id=?',(pid,)).fetchone()
     if not p: return False,'not found'
-    if not key: return False,'AYRSHARE_API_KEY is not configured'
-    base=s['base_url'].rstrip('/')
-    payload={'post':p['caption'],'platforms':[x.strip() for x in p['platforms'].split(',') if x.strip()],
-             'mediaUrls':[f"{base}/media/{p['media_file']}"]}
-    profile=os.getenv('AYRSHARE_PROFILE_KEY')
-    headers={'Authorization':f'Bearer {key}','Content-Type':'application/json'}
-    if profile: headers['Profile-Key']=profile
+    live=(s.get('publishing_mode')=='live' and not force_test)
+    payload=facebook_payload(p,live=live,base_url=s['base_url'])
+    payload['access_token']=cfg['token']
     try:
-        r=requests.post('https://api.ayrshare.com/api/post',headers=headers,json=payload,timeout=60)
+        url=f"https://graph.facebook.com/{cfg['api_version']}/{cfg['page_id']}/videos"
+        r=requests.post(url,data=payload,timeout=90)
         if r.status_code>=400:
             raise RuntimeError(f'{r.status_code}: {r.text[:500]}')
-        data=r.json(); ext=data.get('id') or data.get('postIds') or data
+        data=r.json(); ext=data.get('id') or data
         with db_conn() as c:
-            c.execute('UPDATE posts SET status=?,external_id=?,error=NULL WHERE id=?',('published',json.dumps(ext),pid))
+            now=datetime.now(ZoneInfo(cfg['timezone'])).isoformat()
+            c.execute('UPDATE posts SET status=?,scheduled_at=?,external_id=?,error=NULL WHERE id=?',('published' if live else 'facebook_unpublished',now,json.dumps(ext),pid))
         return True,data
     except Exception as e:
         with db_conn() as c: c.execute('UPDATE posts SET status=?,error=? WHERE id=?',('failed',str(e),pid))
@@ -189,32 +207,34 @@ def publish_post(pid):
 
 def autopilot_tick():
     s=get_settings()
-    if s.get('autopilot')!='1': return
-    now=datetime.now()
+    if s.get('autopilot')!='1' or s.get('publishing_mode')!='live': return
+    tz=ZoneInfo(facebook_config()['timezone']); now=datetime.now(tz)
     if str(now.weekday()) not in s['posting_days'].split(','): return
     if now.hour != int(s['posting_hour']): return
     # one post per local date
     today=now.date().isoformat()
     with db_conn() as c:
-        count=c.execute("SELECT COUNT(*) n FROM posts WHERE substr(created_at,1,10)=? AND status='published'",(today,)).fetchone()['n']
+        count=c.execute("SELECT COUNT(*) n FROM posts WHERE substr(scheduled_at,1,10)=? AND status='published'",(today,)).fetchone()['n']
     if count: return
     pid=create_post(); publish_post(pid)
 
 PAGE='''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Invome Autopilot</title>
 <style>body{font-family:Arial,sans-serif;background:#10141c;color:#f5f7fa;margin:0}.wrap{max-width:1050px;margin:auto;padding:32px}.card{background:#1b2230;border:1px solid #303a4d;border-radius:16px;padding:22px;margin:18px 0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}input,select{width:100%;box-sizing:border-box;padding:11px;border-radius:9px;border:1px solid #49556c;background:#10141c;color:white}button{padding:11px 16px;border:0;border-radius:9px;font-weight:700;cursor:pointer}.primary{background:white;color:#10141c}.green{background:#4ade80;color:#102016}.muted{color:#aab3c2;font-size:14px}.post{padding:14px;border-top:1px solid #313a4b}.badge{padding:4px 8px;border-radius:20px;background:#303a4d;font-size:12px}a{color:#b9d5ff}</style></head><body><div class=wrap><h1>Invome Content Autopilot</h1><p class=muted>Generate → make media → publish automatically.</p>
 <div class=card><h2>Autopilot</h2><form method=post action=/settings><div class=grid>
-<label>Website<input name=site_url value="{{s.site_url}}"></label><label>Platforms<input name=platforms value="{{s.platforms}}"></label>
+<label>Website<input name=site_url value="{{s.site_url}}"></label><label>Destination<input value="InvoMe Facebook Page" disabled></label>
 <label>Posting hour (0-23)<input name=posting_hour value="{{s.posting_hour}}"></label><label>Days (Mon=0 … Sun=6)<input name=posting_days value="{{s.posting_days}}"></label>
-<label>Public app URL<input name=base_url value="{{s.base_url}}"></label><label>Autopilot<select name=autopilot><option value=0 {% if s.autopilot!='1' %}selected{% endif %}>OFF</option><option value=1 {% if s.autopilot=='1' %}selected{% endif %}>ON</option></select></label></div><br><button class=primary>Save settings</button></form>
-<p class=muted>Keys are read from secure environment variables: OPENAI_API_KEY / OPENAI_MODEL and AYRSHARE_API_KEY. A profile key is optional.</p></div>
-<div class=card><h2>Run it now</h2><form method=post action=/generate style="display:inline"><button class=primary>Generate post</button></form> <form method=post action=/generate-publish style="display:inline"><button class=green>Generate + Publish</button></form></div>
+<label>Public app URL<input name=base_url value="{{s.base_url}}"></label><label>Publishing mode<select name=publishing_mode><option value=test {% if s.publishing_mode!='live' %}selected{% endif %}>TEST — drafts only</option><option value=live {% if s.publishing_mode=='live' %}selected{% endif %}>LIVE — auto-publish</option></select></label>
+<label>Autopilot<select name=autopilot><option value=0 {% if s.autopilot!='1' %}selected{% endif %}>OFF</option><option value=1 {% if s.autopilot=='1' %}selected{% endif %}>ON</option></select></label></div><br><button class=primary>Save settings</button></form>
+<p class=muted>Facebook credential: <b>{{'configured' if facebook_ready else 'missing'}}</b>. Test mode uploads an unpublished Facebook video and never puts it on the Page timeline. Autopilot only runs when both LIVE and ON.</p></div>
+<div class=card><h2>Run it now</h2><form method=post action=/generate style="display:inline"><button class=primary>Generate Draft</button></form> <form method=post action=/generate-test style="display:inline"><button class=green>Send Controlled Unpublished Test</button></form></div>
 <div class=card><h2>Recent posts</h2>{% for p in posts %}<div class=post><b>{{p.title}}</b> <span class=badge>{{p.status}}</span><p>{{p.caption}}</p>{% if p.media_file %}<a href="/media/{{p.media_file}}" target=_blank>Preview video</a>{% endif %}{% if p.error %}<p style="color:#fca5a5">{{p.error}}</p>{% endif %}</div>{% else %}<p class=muted>No posts yet.</p>{% endfor %}</div>
 </div></body></html>'''
 
 @app.route('/')
 def home():
     with db_conn() as c: posts=c.execute('SELECT * FROM posts ORDER BY id DESC LIMIT 20').fetchall()
-    return render_template_string(PAGE,s=get_settings(),posts=posts)
+    cfg=facebook_config()
+    return render_template_string(PAGE,s=get_settings(),posts=posts,facebook_ready=bool(cfg['token'] and cfg['page_id']))
 
 @app.post('/settings')
 def settings_route():
@@ -224,13 +244,19 @@ def settings_route():
 def generate_route():
     create_post(); return '<script>location.href="/"</script>'
 
-@app.post('/generate-publish')
-def generate_publish_route():
-    pid=create_post(); publish_post(pid); return '<script>location.href="/"</script>'
+@app.post('/generate-test')
+def generate_test_route():
+    pid=create_post(); publish_post(pid,force_test=True); return '<script>location.href="/"</script>'
 
 @app.post('/api/autopilot/run')
 def run_api():
+    s=get_settings()
+    if s.get('publishing_mode')!='live' or s.get('autopilot')!='1':
+        return jsonify({'ok':False,'error':'Live autopilot is not enabled; use the controlled test route from the dashboard.'}),409
     pid=create_post(); ok,res=publish_post(pid); return jsonify({'ok':ok,'post_id':pid,'result':res})
+
+@app.get('/health')
+def health(): return jsonify({'ok':True,'service':'invome-autopilot','publisher':'facebook'})
 
 @app.get('/media/<path:name>')
 def media(name): return send_from_directory(MEDIA_DIR,name)

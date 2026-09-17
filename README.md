@@ -4,7 +4,7 @@ A small always-on web app for Invome that:
 
 1. Generates a fresh Invome marketing post.
 2. Creates a branded 1080x1920 image and a 10-second vertical MP4 automatically.
-3. Publishes the post through Ayrshare to the selected social networks.
+3. Publishes directly to the InvoMe Facebook Page through Meta's official API.
 4. Repeats on a daily schedule when Autopilot is ON.
 
 ## What is already built
@@ -12,8 +12,8 @@ A small always-on web app for Invome that:
 - Invome-specific content templates.
 - Optional OpenAI-powered copy generation.
 - Automatic branded video creation using Pillow + FFmpeg.
-- Facebook / Instagram / TikTok / Pinterest platform selection.
-- Ayrshare publishing connector.
+- Facebook-only Meta publishing connector.
+- Safe test mode that uploads an unpublished Facebook video.
 - Simple browser dashboard.
 - SQLite post history and failure logging.
 - Background scheduler.
@@ -21,11 +21,21 @@ A small always-on web app for Invome that:
 
 ## One-time setup
 
-Automatic publishing requires social authorization. Create/connect the social accounts in Ayrshare, then add the Ayrshare API key to the deployed app as `AYRSHARE_API_KEY`.
+Automatic publishing uses a Meta system-user token with `pages_manage_posts`, `pages_read_engagement`, and `pages_show_list`. In Railway set `FACEBOOK_PAGE_ACCESS_TOKEN`, `FACEBOOK_PAGE_ID`, `FACEBOOK_GRAPH_API_VERSION`, and optionally `FACEBOOK_TIMEZONE` (defaults to `America/New_York`). Never commit the token to GitHub.
 
 For AI-written copy, add `OPENAI_API_KEY` and set `OPENAI_MODEL` to a model available in your OpenAI API account. If you don't add these, Invome Autopilot still works using the built-in content library.
 
-Set `BASE_URL` to the public URL of the deployed app so the publishing service can fetch generated media.
+Set `BASE_URL` to the public Railway URL so Facebook can fetch generated media.
+
+## Controlled test
+
+1. Leave Publishing mode on **TEST — drafts only** and Autopilot **OFF**.
+2. Click **Send Controlled Unpublished Test**.
+3. Review the uploaded video in Meta's unpublished content. The request uses `published=false`, so it does not appear on the Page timeline.
+
+## Enabling live autopilot
+
+Only after the controlled upload looks correct: confirm the InvoMe Facebook Page, switch Publishing mode to **LIVE — auto-publish**, then turn Autopilot **ON**. Both settings are required; the scheduled job and API route refuse to publish if either safety control is off. TikTok and Instagram are not targeted.
 
 ## Run locally
 
