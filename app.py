@@ -145,7 +145,7 @@ def fit_text(draw, text, width, start=64, min_size=30, bold=True):
         size-=4
     return font(min_size,bold), lines
 
-def make_media(copy, post_id, site_url):
+def make_media(copy, post_id, site_url, media_kind='video'):
     W,H=1080,1920
     bg_path=APP_DIR/'invome-studio-bg.png'
     icon_path=APP_DIR/'invome-icon.png'
@@ -209,6 +209,8 @@ def make_media(copy, post_id, site_url):
     d.text(((W-tw)//2,1825),display_url,font=font(31,True),fill=(20,16,18,255))
     png=f'post_{post_id}.png'; mp4=f'post_{post_id}.mp4'
     img.save(MEDIA_DIR/png)
+    if media_kind == 'image':
+        return png
     # Railway's smallest containers cannot safely render a 1080p zoompan animation.
     # A 540x960 H.264 still-video remains vertical and Facebook-compatible while
     # using a fraction of the memory.
@@ -229,7 +231,10 @@ def create_post(scheduled_at=None):
               (datetime.now(timezone.utc).isoformat(),scheduled_at,cp['title'],cp['caption'],cp['hook'],s['platforms'],'draft'))
         pid=cur.lastrowid
     try:
-        media=make_media(cp,pid,s['site_url'])
+        # Five-post cycle: video, image, video, video, image (60/40 mix).
+        # This prevents back-to-back images and limits videos to two in a row.
+        media_kind=('video','image','video','video','image')[(pid-1)%5]
+        media=make_media(cp,pid,s['site_url'],media_kind)
         with db_conn() as c:
             c.execute('UPDATE posts SET media_file=? WHERE id=?',(media,pid))
     except Exception as e:
@@ -248,11 +253,9 @@ def facebook_config():
 
 def facebook_payload(post, live=False, base_url=None):
     media_url=f"{(base_url or get_settings()['base_url']).rstrip('/')}/media/{post['media_file']}"
-    return {
-        'file_url': media_url,
-        'description': post['caption'],
-        'published': 'true' if live else 'false',
-    }
+    if str(post['media_file']).lower().endswith('.mp4'):
+        return {'file_url':media_url,'description':post['caption'],'published':'true' if live else 'false'}
+    return {'url':media_url,'message':post['caption'],'published':'true' if live else 'false'}
 
 def page_access_token(cfg):
     """Exchange the configured user/system-user token for this Page's token."""
@@ -288,7 +291,8 @@ def publish_post(pid, force_test=False):
     payload=facebook_payload(p,live=live,base_url=s['base_url'])
     try:
         payload['access_token']=page_access_token(cfg)
-        url=f"https://graph.facebook.com/{cfg['api_version']}/{cfg['page_id']}/videos"
+        edge='videos' if str(p['media_file']).lower().endswith('.mp4') else 'photos'
+        url=f"https://graph.facebook.com/{cfg['api_version']}/{cfg['page_id']}/{edge}"
         r=requests.post(url,data=payload,timeout=90)
         if r.status_code>=400:
             raise RuntimeError(f'{r.status_code}: {r.text[:500]}')
@@ -315,7 +319,7 @@ def autopilot_tick():
     pid=create_post(); publish_post(pid)
 
 PAGE='''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Invome Autopilot</title>
-<style>body{font-family:Arial,sans-serif;background:#10141c;color:#f5f7fa;margin:0}.wrap{max-width:1050px;margin:auto;padding:32px}.card{background:#1b2230;border:1px solid #303a4d;border-radius:16px;padding:22px;margin:18px 0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}input,select{width:100%;box-sizing:border-box;padding:11px;border-radius:9px;border:1px solid #49556c;background:#10141c;color:white}button{padding:11px 16px;border:0;border-radius:9px;font-weight:700;cursor:pointer}.primary{background:white;color:#10141c}.green{background:#4ade80;color:#102016}.muted{color:#aab3c2;font-size:14px}.post{padding:14px;border-top:1px solid #313a4b}.badge{padding:4px 8px;border-radius:20px;background:#303a4d;font-size:12px}a{color:#b9d5ff}</style></head><body><div class=wrap><h1>Invome Content Autopilot</h1><p class=muted>Generate → make media → publish automatically.</p>
+<style>body{font-family:Arial,sans-serif;background:#10141c;color:#f5f7fa;margin:0}.wrap{max-width:1050px;margin:auto;padding:32px}.card{background:#1b2230;border:1px solid #303a4d;border-radius:16px;padding:22px;margin:18px 0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}input,select{width:100%;box-sizing:border-box;padding:11px;border-radius:9px;border:1px solid #49556c;background:#10141c;color:white}button,.button{display:inline-block;padding:11px 16px;border:0;border-radius:9px;font-weight:700;cursor:pointer;text-decoration:none}.primary{background:white;color:#10141c}.green{background:#4ade80;color:#102016}.berry{background:#8b2b52;color:white}.muted{color:#aab3c2;font-size:14px}.post{padding:18px 14px;border-top:1px solid #313a4b}.badge{padding:4px 8px;border-radius:20px;background:#303a4d;font-size:12px}.groupkit{margin-top:14px;padding:14px;border-radius:12px;background:#151b27;border:1px solid #303a4d}.groupkit button,.groupkit a{margin:4px 8px 4px 0}a{color:#b9d5ff}.copybox{position:absolute;left:-9999px}</style></head><body><div class=wrap><h1>Invome Content Autopilot</h1><p class=muted>Generate → make media → publish automatically.</p>
 <div class=card><h2>Autopilot</h2><form method=post action=/settings><div class=grid>
 <label>Website<input name=site_url value="{{s.site_url}}"></label><label>Destination<input value="InvoMe Facebook Page" disabled></label>
 <label>Posting hour (0-23)<input name=posting_hour value="{{s.posting_hour}}"></label><label>Days (Mon=0 … Sun=6)<input name=posting_days value="{{s.posting_days}}"></label>
@@ -323,8 +327,8 @@ PAGE='''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" c
 <label>Autopilot<select name=autopilot><option value=0 {% if s.autopilot!='1' %}selected{% endif %}>OFF</option><option value=1 {% if s.autopilot=='1' %}selected{% endif %}>ON</option></select></label></div><br><button class=primary>Save settings</button></form>
 <p class=muted>Facebook credential: <b>{{'configured' if facebook_ready else 'missing'}}</b>. Test mode uploads an unpublished Facebook video and never puts it on the Page timeline. Autopilot only runs when both LIVE and ON.</p></div>
 <div class=card><h2>Run it now</h2><form method=post action=/generate style="display:inline"><button class=primary>Generate Draft</button></form> <form method=post action=/generate-test style="display:inline"><button class=green>Send Controlled Unpublished Test</button></form></div>
-<div class=card><h2>Recent posts</h2>{% for p in posts %}<div class=post><b>{{p.title}}</b> <span class=badge>{{p.status}}</span><p>{{p.caption}}</p>{% if p.media_file %}<a href="/media/{{p.media_file}}" target=_blank>Preview video</a>{% endif %}{% if p.error %}<p style="color:#fca5a5">{{p.error}}</p>{% endif %}</div>{% else %}<p class=muted>No posts yet.</p>{% endfor %}</div>
-</div></body></html>'''
+<div class=card><h2>Recent posts</h2>{% for p in posts %}<div class=post><b>{{p.title}}</b> <span class=badge>{{p.status}}</span> <span class=badge>{{'video' if p.media_file and p.media_file.endswith('.mp4') else 'image'}}</span><p>{{p.caption}}</p>{% if p.media_file %}<a href="/media/{{p.media_file}}" target=_blank>Preview {{'video' if p.media_file.endswith('.mp4') else 'image'}}</a><div class=groupkit><b>Group Sharing Kit</b><p class=muted>Facebook requires group posts to be shared manually. Copy the caption, download the media, then post them in an approved group.</p><textarea class=copybox id="caption-{{p.id}}">{{p.caption}}</textarea><button type=button class=berry onclick="copyCaption({{p.id}},this)">Copy group caption</button><a class="button primary" href="/media/{{p.media_file}}" download>Download {{'video' if p.media_file.endswith('.mp4') else 'image'}}</a></div>{% endif %}{% if p.error %}<p style="color:#fca5a5">{{p.error}}</p>{% endif %}</div>{% else %}<p class=muted>No posts yet.</p>{% endfor %}</div>
+</div><script>async function copyCaption(id,btn){const text=document.getElementById('caption-'+id).value;try{await navigator.clipboard.writeText(text);btn.textContent='Caption copied';setTimeout(()=>btn.textContent='Copy group caption',1800)}catch(e){const box=document.getElementById('caption-'+id);box.style.position='static';box.select();document.execCommand('copy');box.style.position='absolute';btn.textContent='Caption copied'}}</script></body></html>'''
 
 @app.route('/')
 def home():
